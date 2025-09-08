@@ -1,0 +1,39 @@
+
+{
+  "expo": {
+    "name": "Testly",
+    "slug": "testly_mobile",
+    "scheme": "testly",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "assetBundlePatterns": ["**/*"],
+    "experiments": { "typedRoutes": true },
+
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Bu uygulama fotoğraf çekmek için kamerayı kullanır.",
+          "microphonePermission": "Bu uygulama video için mikrofona erişebilir."
+        }
+      ]
+    ],
+
+    "android": {
+      "package": "com.testly.app",
+      "permissions": ["CAMERA", "READ_MEDIA_IMAGES", "VIBRATE"],
+      "newArchEnabled": true
+    },
+
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Fotoğraf çekmek için kameraya erişim gerekir.",
+        "NSMicrophoneUsageDescription": "Video kaydı için mikrofona erişim gerekir.",
+        "NSPhotoLibraryAddUsageDescription": "Çektiğiniz fotoğrafları Fotoğraflar'a kaydetmek için izin gerekir."
+      }
+    }
+  }
+}
