@@ -6,6 +6,7 @@ import { FlatList, Image, Text, TouchableOpacity, View } from "react-native";
 import { useFolders } from "../../src/FoldersContext";
 import { useQuestions } from "../../src/QuestionsContext";
 
+
 export default function QuestionsScreen() {
   const router = useRouter();
   const { setSelectedFolder } = useFolders();

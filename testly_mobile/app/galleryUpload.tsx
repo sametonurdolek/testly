@@ -16,37 +16,36 @@ export default function GalleryUpload() {
   const targetFolder = (folder && String(folder).trim()) || "Genel";
 
   const ensurePermissionAndPick = async () => {
-    try {
-      setBusy(true);
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert("İzin gerekli", "Galeriye erişim izni vermelisin.");
-        router.back();
-        return;
-      }
+  try {
+    setBusy(true);
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert("İzin gerekli", "Galeriye erişim izni vermelisin.");
+      router.back();
+      return;
+    }
 
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsMultipleSelection: true,
-        selectionLimit: 0, // sınırsız
-        quality: 1,
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsMultipleSelection: true,
+      selectionLimit: 0, // sınırsız
+      quality: 1,
+    });
+
+    if (!result.canceled) {
+      result.assets.forEach((a: ImagePicker.ImagePickerAsset) => {
+        addQuestion(targetFolder, a.uri, "A");
       });
 
-      if (result.canceled) {
-        // Kullanıcı seçim yapmadıysa geri dön
-        router.back();
-        return;
-      }
-
-      // Context’e ekle
-      result.assets.forEach(a => addQuestion(targetFolder, a.uri, "A"));
-
-      // Önizleme için tümünü göster
-      setImages(result.assets.map(a => a.uri));
-    } finally {
-      setBusy(false);
+      setImages(
+        result.assets.map((a: ImagePicker.ImagePickerAsset) => a.uri)
+      );
     }
-  };
+  } finally {
+    setBusy(false);
+  }
+};
+
 
   // Ekran açılır açılmaz galeriye git
   useEffect(() => {

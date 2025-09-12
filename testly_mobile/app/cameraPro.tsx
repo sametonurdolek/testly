@@ -1,4 +1,3 @@
-// app/cameraPro.tsx
 import {
   CameraMode,
   CameraType,
@@ -8,6 +7,7 @@ import {
   FlashMode,
   FocusMode,
   VideoQuality,
+  CameraRatio,
 } from "expo-camera";
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import {
@@ -27,12 +27,15 @@ import AntDesign from "@expo/vector-icons/AntDesign";
 import Feather from "@expo/vector-icons/Feather";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
-import * as FileSystem from "expo-file-system";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuestions } from "../src/QuestionsContext";
+// Import the new object-oriented FileSystem API. The legacy
+// `expo-file-system` module has been replaced with an OOP API in
+// SDK 54. See the changelog for more details【963569638619089†L367-L375】.
+import { File, Directory, Paths } from "expo-file-system";
 
 export default function App() {
-  // İzinler
+  // Permissions
   const [camPerm, requestCamPerm] = useCameraPermissions();
   const [micPerm, requestMicPerm] = useMicrophonePermissions();
 
@@ -44,14 +47,14 @@ export default function App() {
   // Context
   const { addQuestion } = useQuestions();
 
-  // Tek kamera kuralı
+  // Enforce a single camera instance while the screen is active
   const [screenActive, setScreenActive] = useState(true);
   const [cameraKey, setCameraKey] = useState(0);
 
   useFocusEffect(
     useCallback(() => {
       setScreenActive(true);
-      setCameraKey((k) => k + 1); // her fokus’ta yeni instance
+      setCameraKey((k) => k + 1); // new instance on each focus
       return () => {
         setScreenActive(false);
         setTorch(false);
@@ -59,7 +62,7 @@ export default function App() {
     }, [])
   );
 
-  // Kamera durumu
+  // Camera state
   const [recording, setRecording] = useState(false);
   const [mode, setMode] = useState<CameraMode>("picture");
   const [facing, setFacing] = useState<CameraType>("back");
@@ -69,17 +72,16 @@ export default function App() {
   const [zoom, setZoom] = useState(0);
   const [mirror, setMirror] = useState(false);
 
-  // Kalite
+  // Quality
   const [videoQuality] = useState<VideoQuality>("1080p");
   const [videoBitrate] = useState<number>(10_000_000);
-  const [ratio] = useState<string>("16:9");
+  const [ratio] = useState<CameraRatio>("16:9");
   const [pictureSize, setPictureSize] = useState<string | undefined>(undefined);
 
-  // Özellik
-  const [toggleRecAvailable, setToggleRecAvailable] = useState(false);
+  // Barcode
   const [scanEnabled, setScanEnabled] = useState(false);
 
-  // Çekimler ve seçim
+  // Shots and selection
   const [shots, setShots] = useState<string[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const selectedCount = selected.size;
@@ -93,8 +95,21 @@ export default function App() {
   if (!camPerm) return null;
   if (!camPerm.granted) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: "black" }}>
-        <Text style={{ color: "white", marginBottom: 8, textAlign: "center" }}>
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: "black",
+        }}
+      >
+        <Text
+          style={{
+            color: "white",
+            marginBottom: 8,
+            textAlign: "center",
+          }}
+        >
           Kamerayı kullanmak için izin gerekli
         </Text>
         <Button onPress={requestCamPerm} title="Kamera izni ver" />
@@ -103,26 +118,38 @@ export default function App() {
   }
 
   // ------- helpers -------
-  const ensureDir = async (dir: string) => {
-    const info = await FileSystem.getInfoAsync(dir);
-    if (!info.exists) await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
-  };
 
-  const saveToAppStorage = async (fromUri: string) => {
-    if (Platform.OS === "web") return fromUri;
-    const dir = FileSystem.documentDirectory! + "photos";
-    await ensureDir(dir);
-    const to = `${dir}/${Date.now()}.jpg`;
-    await FileSystem.copyAsync({ from: fromUri, to });
-    return to;
-  };
+  /**
+   * Save a captured media file into the app's storage. When running on
+   * web the camera API provides a base64 URI, which we can return
+   * directly. On native platforms we copy the file into a `photos`
+   * directory under the document directory (falling back to the cache
+   * directory if the document directory does not exist) using the
+   * new object-oriented file-system API. This avoids using the
+   * now‑deprecated imperative methods of the legacy FileSystem API.
+   */
+ // cameraPro.tsx içinde
+const saveToAppStorage = async (fromUri: string): Promise<string> => {
+  if (Platform.OS === "web") return fromUri;
 
-  const onCameraReady = async () => {
-    try {
-      const features = await ref.current?.getSupportedFeatures();
-      setToggleRecAvailable(!!features?.toggleRecordingAsyncAvailable);
-      // pictureSize seçimi şimdilik kapalı
-    } catch {}
+  let baseDir: Directory = Paths.document;
+  if (!baseDir.exists) baseDir = Paths.cache;
+
+  const photosDir = new Directory(baseDir, "photos");
+  if (!photosDir.exists) photosDir.create({ intermediates: true });
+
+  // URI'den güvenli şekilde kaynak dosyayı kur
+  const srcFile = new File(Paths.dirname(fromUri), Paths.basename(fromUri));
+  const destFile = new File(photosDir, `${Date.now()}.jpg`);
+  srcFile.copy(destFile);
+
+  return destFile.uri;
+};
+
+
+  const onCameraReady = () => {
+    // If needed, you can query available picture sizes here with
+    // CameraView.getAvailablePictureSizesAsync() and pick a specific size.
   };
 
   const onMountError = (e: any) => {
@@ -167,23 +194,27 @@ export default function App() {
   };
 
   const toggleRecording = async () => {
-    if (toggleRecAvailable) {
-      // @ts-ignore
-      await ref.current?.toggleRecordingAsync();
-      setRecording((r) => !r);
-    } else {
-      if (recording) stopRecord();
-      else await startRecord();
-    }
+    if (recording) stopRecord();
+    else await startRecord();
   };
 
   // ------- toggles -------
-  const toggleMode = () => setMode((p) => (p === "picture" ? "video" : "picture"));
-  const toggleFacing = () => setFacing((p) => (p === "back" ? "front" : "back"));
-  const cycleFlash = () => setFlash((f) => (f === "off" ? "on" : f === "on" ? "auto" : "off"));
-  const toggleTorch = () => setTorch((t) => !t);
-  const toggleAF = () => setAutofocus((a) => (a === "on" ? "off" : "on"));
-  const bumpZoom = (d: number) => setZoom((z) => Math.min(1, Math.max(0, +(z + d).toFixed(3))));
+  const toggleMode = () =>
+    setMode((p: CameraMode) => (p === "picture" ? "video" : "picture"));
+
+  const toggleFacing = () =>
+    setFacing((p: CameraType) => (p === "back" ? "front" : "back"));
+
+  const cycleFlash = () =>
+    setFlash((f: FlashMode) => (f === "off" ? "on" : f === "on" ? "auto" : "off"));
+
+  const toggleTorch = () => setTorch((t: boolean) => !t);
+
+  const toggleAF = () =>
+    setAutofocus((a: FocusMode) => (a === "on" ? "off" : "on"));
+
+  const bumpZoom = (d: number) =>
+    setZoom((z: number) => Math.min(1, Math.max(0, +(z + d).toFixed(3))));
 
   // ------- selection -------
   const toggleSelect = (u: string) => {
@@ -195,11 +226,21 @@ export default function App() {
     });
   };
 
-  const proceed = () => {
-    if (selectedCount === 0) return;
-    selected.forEach((u) => addQuestion(targetFolder, u, "A"));
-    router.replace({ pathname: "/(tabs)/questions", params: { folder: targetFolder } });
-  };
+ // cameraPro.tsx -> proceed()
+const API = process.env.EXPO_PUBLIC_API_URL!;
+const proceed = async () => {
+  if (selectedCount === 0) return;
+  for (const u of Array.from(selected)) {
+    const form = new FormData();
+    form.append("image", { uri: u, name: "capture.jpg", type: "image/jpeg" } as any);
+    const res = await fetch(`${API}/api/v1/process-image`, { method: "POST", body: form });
+    const json = await res.json();
+    if (res.ok && json.processed_url) addQuestion(targetFolder, json.processed_url, "A");
+  }
+  router.replace({ pathname: "/(tabs)/questions", params: { folder: targetFolder } });
+};
+
+
 
   // ------- UI controls -------
   const IconBtn: React.FC<PressableProps & { children: React.ReactNode }> = ({
@@ -227,17 +268,39 @@ export default function App() {
 
   const shutterInnerStyle =
     mode === "picture"
-      ? { width: 80, height: 80, borderRadius: 9999, backgroundColor: "white" }
+      ? {
+          width: 80,
+          height: 80,
+          borderRadius: 9999,
+          backgroundColor: "white",
+        }
       : recording
-      ? { width: 80, height: 80, borderRadius: 9999, backgroundColor: "#6b7280" }
-      : { width: 80, height: 80, borderRadius: 9999, backgroundColor: "#dc2626" };
+      ? {
+          width: 80,
+          height: 80,
+          borderRadius: 9999,
+          backgroundColor: "#6b7280",
+        }
+      : {
+          width: 80,
+          height: 80,
+          borderRadius: 9999,
+          backgroundColor: "#dc2626",
+        };
 
   const Controls = () => (
     <View
       pointerEvents="box-none"
-      style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, justifyContent: "flex-end" }}
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        justifyContent: "flex-end",
+      }}
     >
-      {/* Alt: çekim şeridi */}
+      {/* Bottom: shot strip */}
       {shots.length > 0 && (
         <View style={{ marginBottom: 160, paddingHorizontal: 8 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -257,9 +320,9 @@ export default function App() {
                   </View>
                   <View style={{ position: "absolute", right: 4, top: 4 }}>
                     {isSel ? (
-                      <Feather name="check-circle" size={18} color="#3b82f6" />
+                      <Feather name="check-circle" size={18} />
                     ) : (
-                      <Feather name="circle" size={18} color="#ffffff99" />
+                      <Feather name="circle" size={18} />
                     )}
                   </View>
                 </Pressable>
@@ -269,7 +332,7 @@ export default function App() {
         </View>
       )}
 
-      {/* Alt: ana kontrol paneli */}
+      {/* Bottom: main control panel */}
       <View
         style={{
           minHeight: 140,
@@ -282,8 +345,16 @@ export default function App() {
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {/* Sol grup */}
-          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingRight: 16 }}>
+          {/* Left group */}
+          <View
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingRight: 16,
+            }}
+          >
             <IconBtn onPress={toggleMode}>
               {mode === "picture" ? (
                 <AntDesign name="picture" size={22} color="white" />
@@ -301,7 +372,7 @@ export default function App() {
             </IconBtn>
           </View>
 
-          {/* Ortadaki deklanşör */}
+          {/* Middle shutter */}
           <View style={{ width: 112, alignItems: "center", justifyContent: "center" }}>
             <Pressable
               onPress={mode === "picture" ? takePicture : toggleRecording}
@@ -323,8 +394,16 @@ export default function App() {
             </Pressable>
           </View>
 
-          {/* Sağ grup */}
-          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingLeft: 16 }}>
+          {/* Right group */}
+          <View
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "space-between",
+              paddingLeft: 16,
+            }}
+          >
             <IconBtn onPress={toggleFacing}>
               <FontAwesome6 name="rotate-left" size={22} color="white" />
             </IconBtn>
@@ -350,10 +429,10 @@ export default function App() {
     </View>
   );
 
-  // Kamera + overlay
+  // Camera + overlay
   return (
     <View style={{ flex: 1, backgroundColor: "black" }}>
-      {/* Üst bar */}
+      {/* Top bar */}
       <SafeAreaView edges={["top"]} style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <Text style={{ color: "white", fontWeight: "600" }}>
@@ -375,7 +454,7 @@ export default function App() {
         </View>
       </SafeAreaView>
 
-      {/* Kamera + overlay */}
+      {/* Camera + overlay */}
       <View style={{ flex: 1, position: "relative" }}>
         {screenActive ? (
           <CameraView
@@ -388,6 +467,11 @@ export default function App() {
             enableTorch={torch}
             autofocus={autofocus}
             zoom={zoom}
+            mirror={mirror}
+            ratio={ratio}
+            pictureSize={pictureSize}
+            videoQuality={videoQuality}
+            videoBitrate={videoBitrate}
             mute={false}
             onCameraReady={onCameraReady}
             onMountError={onMountError}

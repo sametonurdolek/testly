@@ -2,6 +2,8 @@ import * as NavigationBar from "expo-navigation-bar";
 import { Tabs } from "expo-router";
 import React, { useEffect } from "react";
 import { Image, ImageBackground, Text, View } from "react-native";
+import { QuestionsProvider } from "../../src/QuestionsContext";
+import { FoldersProvider } from "../../src/FoldersContext";
 
 
 const TabIcon = ({ focused, icon, title }: any) => {

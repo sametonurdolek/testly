@@ -11,17 +11,21 @@ const FoldersContext = createContext<FoldersContextType | undefined>(undefined);
 
 export const FoldersProvider = ({ children }: { children: ReactNode }) => {
   const [folders, setFolders] = useState<string[]>(["Matematik", "Fizik", "Kimya"]);
-  const [selectedFolder, setSelectedFolder] = useState<string | null>(folders[0] ?? null);
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(
+    folders.length > 0 ? folders[0] : null
+  );
 
   const addFolder = (name: string) => {
     const n = name.trim();
     if (!n) return;
-    setFolders(prev => (prev.includes(n) ? prev : [...prev, n]));
+    setFolders((prev) => (prev.includes(n) ? prev : [...prev, n]));
     setSelectedFolder(n);
   };
 
   return (
-    <FoldersContext.Provider value={{ folders, addFolder, selectedFolder, setSelectedFolder }}>
+    <FoldersContext.Provider
+      value={{ folders, addFolder, selectedFolder, setSelectedFolder }}
+    >
       {children}
     </FoldersContext.Provider>
   );

@@ -1,6 +1,13 @@
 import React, { useRef, useEffect, useState } from "react";
-import { View, Text, TouchableOpacity, FlatList, Image, Modal, TextInput } from "react-native";
-import DropDownPicker from "react-native-dropdown-picker";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  FlatList,
+  Image,
+  Modal,
+  TextInput,
+} from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFolders } from "../../src/FoldersContext";
@@ -9,21 +16,20 @@ export default function HomeScreen() {
   const router = useRouter();
   const { folders, addFolder, selectedFolder, setSelectedFolder } = useFolders();
 
-  const [open, setOpen] = useState(false);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [image, setImage] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    if (isModalVisible && inputRef.current) setTimeout(() => inputRef.current?.focus(), 100);
+    if (isModalVisible && inputRef.current) {
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
   }, [isModalVisible]);
-
-  const items = folders.map((f) => ({ label: f, value: f }));
 
   return (
     <SafeAreaView edges={["top"]} className="flex-1 bg-white">
-      {/* Header: ➕ Klasör Yarat */}
+      {/* Header */}
       <View className="items-end px-4 pt-2 pb-2">
         <TouchableOpacity
           className="rounded-lg bg-green-500 px-4 py-4"
@@ -33,14 +39,16 @@ export default function HomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* 📁 Klasörler */}
-      <FlatList
+      {/* Klasörler */}
+      <FlatList<string>
         data={folders}
         keyExtractor={(item) => item}
         numColumns={3}
         renderItem={({ item }) => (
           <TouchableOpacity
-            className="m-2 h-32 w-32 items-center justify-center rounded-xl bg-gray-200"
+            className={`m-2 h-32 w-32 items-center justify-center rounded-xl ${
+              selectedFolder === item ? "bg-blue-300" : "bg-gray-200"
+            }`}
             onPress={() => {
               setSelectedFolder(item);
               router.push({ pathname: "/questions", params: { folder: item } });
@@ -53,7 +61,7 @@ export default function HomeScreen() {
         contentContainerStyle={{ padding: 8 }}
       />
 
-      {/* 📷 Fotoğraf Yükle + Dropdown */}
+      {/* Fotoğraf Yükle */}
       <View className="items-center pb-20">
         <TouchableOpacity
           className="m-2 h-20 w-1/2 items-center justify-center rounded-full bg-blue-500"
@@ -61,30 +69,17 @@ export default function HomeScreen() {
         >
           <Text className="font-bold text-white">Fotoğraf Yükle</Text>
         </TouchableOpacity>
-
-        <View className="mt-2 w-1/2 rounded-md border border-black">
-          <DropDownPicker
-            open={open}
-            value={selectedFolder}
-            items={items}
-            setOpen={setOpen}
-            setValue={(cb) => {
-              const v = typeof cb === "function" ? cb(selectedFolder) : cb;
-              setSelectedFolder(v as string | null);
-            }}
-            setItems={() => {}}
-            placeholder="Klasör seç"
-            style={{ borderWidth: 0, justifyContent: "center" }}
-            textStyle={{ textAlign: "center" }}
-            dropDownContainerStyle={{ borderWidth: 0 }}
-          />
-        </View>
       </View>
 
-      {/* 🖼️ Seçilen Fotoğraf Göster (opsiyonel) */}
-      {image && <Image source={{ uri: image }} className="mt-4 h-40 w-40 self-center rounded-lg" />}
+      {/* Seçilen görsel (opsiyonel) */}
+      {image && (
+        <Image
+          source={{ uri: image }}
+          className="mt-4 h-40 w-40 self-center rounded-lg"
+        />
+      )}
 
-      {/* 🔹 Modal */}
+      {/* Yeni klasör modalı */}
       <Modal
         visible={isModalVisible}
         transparent
