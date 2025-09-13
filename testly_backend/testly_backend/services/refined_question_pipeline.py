@@ -1,11 +1,9 @@
 # refined_question_pipeline.py
 # Python 3.9+  |  pip install opencv-python numpy matplotlib
 
-import os, glob, math
-from pathlib import Path
+import os, math
 import cv2 as cv
 import numpy as np
-import matplotlib.pyplot as plt
 
 # ---------- IO helpers (Unicode-safe) ----------
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -20,7 +18,8 @@ def imread_u(path: str, flags=cv.IMREAD_COLOR):
 def imwrite_u(path: str, img) -> bool:
     ext = os.path.splitext(path)[1] or ".png"
     ok, buf = cv.imencode(ext, img)
-    if ok: buf.tofile(path)
+    if ok:
+        buf.tofile(path)
     return ok
 
 # ---------- small utils ----------
@@ -36,7 +35,7 @@ def order_quad(pts):
     s = pts.sum(1); d = np.diff(pts, axis=1).ravel()
     tl = pts[np.argmin(s)]; br = pts[np.argmax(s)]
     tr = pts[np.argmin(d)]; bl = pts[np.argmax(d)]
-    return np.array([tl, tr, bl, br], dtype=np.float32)  # tl, tr, bl, br
+    return np.array([tl, tr, bl, br], dtype=np.float32)
 
 def perspective_warp(bgr, box):
     box = order_quad(box)
@@ -45,7 +44,9 @@ def perspective_warp(bgr, box):
     w = max(w, 10); h = max(h, 10)
     dst = np.array([[0,0],[w-1,0],[0,h-1],[w-1,h-1]], dtype=np.float32)
     M = cv.getPerspectiveTransform(box, dst)
-    return cv.warpPerspective(bgr, M, (w, h), flags=cv.INTER_CUBIC, borderValue=(255,255,255))
+    return cv.warpPerspective(bgr, M, (w, h),
+                              flags=cv.INTER_CUBIC,
+                              borderValue=(255,255,255))
 
 def projection_lobes(mask_roi, axis=1, thr_frac=0.12):
     sums = (mask_roi > 0).sum(axis=axis)
@@ -65,13 +66,8 @@ def gaussian_score(x, mu, tol):
 
 def clamp01(x): return max(0.0, min(1.0, float(x)))
 
-# ---------- YOUR PAGE CROP (integrated) ----------
+# ---------- PAGE CROP ----------
 def page_crop_user(bgr, debug=True):
-    """
-    Gray+CLAHE -> adaptive thr -> invert -> %80 merkez maskesi ->
-    küçük bileşen temizliği -> dilate(H->V) -> close ->
-    en büyük dış kontur boundingRect ile kırp.
-    """
     H, W = bgr.shape[:2]
     k = max(3, round(W / 400))
     images = [] if debug else None
@@ -120,8 +116,10 @@ def page_crop_user(bgr, debug=True):
     if debug: images.append(("Page Crop", page_crop))
     return page_crop, (images or [])
 
-# ---------- core refine on a *page-cropped* image ----------
-def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debug=True):
+# ---------- REFINE ----------
+def refine_question_from_pagecrop(page_crop_bgr,
+                                  invert_to_black_text=True,
+                                  debug=True):
     stages = []
     bgr = page_crop_bgr.copy()
     H, W = bgr.shape[:2]
@@ -155,7 +153,8 @@ def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debu
 
     cnts, _ = cv.findContours(merged, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
     if not cnts:
-        return {"best_box": None, "warped_bgr": None, "final_bw": None, "stages": stages}
+        return {"best_box": None, "warped_bgr": None,
+                "final_bw": None, "stages": stages}
 
     best = None
     best_score = -1.0
@@ -163,8 +162,8 @@ def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debu
 
     for c in cnts:
         area = cv.contourArea(c)
-        if area < 0.01 * W * H: continue
-
+        if area < 0.01 * W * H:
+            continue
         x,y,w,h = cv.boundingRect(c)
         if w*h == 0: continue
 
@@ -186,6 +185,7 @@ def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debu
         v_lobes = projection_lobes(roi, axis=1, thr_frac=0.12)
         h_lobes = projection_lobes(roi, axis=0, thr_frac=0.12)
 
+        # Skor hesapları
         if max(v_lobes, h_lobes) >= 3:
             target_rect_mu, target_rect_tol = 0.70, 0.20
             target_extent_mu, target_extent_tol = 0.65, 0.20
@@ -203,17 +203,15 @@ def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debu
             w_rect, w_ext, w_sol, w_ctr, w_ar = 0.45, 0.20, 0.20, 0.10, 0.05
 
         rectangularity_score = gaussian_score(rectangularity, target_rect_mu, target_rect_tol)
-        extent_score        = gaussian_score(extent,        target_extent_mu, target_extent_tol)
+        extent_score        = gaussian_score(extent, target_extent_mu, target_extent_tol)
         solidity_score      = clamp01(solidity)
         ar_score            = gaussian_score(ar, ar_pref_mu, ar_pref_tol)
 
-        score = (
-            w_rect * rectangularity_score +
-            w_ext  * extent_score +
-            w_sol  * solidity_score +
-            w_ctr  * center_score +
-            w_ar   * ar_score
-        )
+        score = (w_rect * rectangularity_score +
+                 w_ext  * extent_score +
+                 w_sol  * solidity_score +
+                 w_ctr  * center_score +
+                 w_ar   * ar_score)
 
         fill = area / (W*H + 1e-6)
         if fill < 0.10: score -= (0.10 - fill) * 1.5
@@ -230,10 +228,10 @@ def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debu
     if debug: stages.append(("Candidates overlay", overlay))
 
     if best is None:
-        return {"best_box": None, "warped_bgr": None, "final_bw": None, "stages": stages}
+        return {"best_box": None, "warped_bgr": None,
+                "final_bw": None, "stages": stages}
 
     best_box, _ = best
-
     warped = perspective_warp(bgr, best_box)
     if debug: stages.append(("Warped (perspective rectified)", warped))
 
@@ -245,65 +243,7 @@ def refine_question_from_pagecrop(page_crop_bgr, invert_to_black_text=True, debu
         bw = 255 - bw
     if debug: stages.append(("Final BW", bw))
 
-    return {"best_box": best_box, "warped_bgr": warped, "final_bw": bw, "stages": stages}
-
-def _show_stages(stages):
-    n = len(stages); cols = 3; rows = (n + cols - 1) // cols
-    plt.figure(figsize=(16, 5*rows))
-    for i, (title, im) in enumerate(stages, 1):
-        plt.subplot(rows, cols, i)
-        if im.ndim == 2: plt.imshow(im, cmap="gray")
-        else:            plt.imshow(cv.cvtColor(im, cv.COLOR_BGR2RGB))
-        plt.title(title); plt.axis("off")
-    plt.tight_layout(); plt.show()
-
-# ---------- batch runner (save only finals to sonsoru) ----------
-SCRIPT_DIR = Path(__file__).resolve().parent
-
-def run_folder_with_pagecrop(input_dir="sorular",
-                             save_dir=None,
-                             show=False):
-    # Varsayılan: <script_dizini>/sonsoru  (çift "vision" oluşmaz)
-    save_dir = Path(save_dir) if save_dir else (SCRIPT_DIR / "sonsoru")
-    save_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[save_dir] {save_dir.resolve()}")
-
-    # Alt klasörleri de tara
-    paths = sorted([
-        p for p in glob.glob(str(Path(input_dir) / "**" / "*"), recursive=True)
-        if is_image(p)
-    ])
-    print(f"[info] files: {len(paths)}")
-    if not paths:
-        print(f"[warn] no images under {Path(input_dir).resolve()}")
-        return
-
-    for idx, p in enumerate(paths, 1):
-        print(f"[{idx}/{len(paths)}] {p}")
-        bgr = imread_u(p, cv.IMREAD_COLOR)
-        if bgr is None:
-            print(f"[err] read fail: {p}")
-            continue
-
-        pc, pc_stages = page_crop_user(bgr, debug=show)
-        out = refine_question_from_pagecrop(pc, invert_to_black_text=True, debug=show)
-        if out["final_bw"] is None:
-            print(f"[warn] no candidate after refine: {p}")
-            if show and pc_stages: _show_stages(pc_stages)
-            continue
-
-        stem = Path(p).stem
-        base = f"{stem}_final"
-        out_path = save_dir / f"{base}.png"
-        i = 1
-        while out_path.exists():
-            out_path = save_dir / f"{base}_{i}.png"
-            i += 1
-
-        ok = imwrite_u(str(out_path), out["final_bw"])
-        print(f"[{'ok' if ok else 'err'}] write -> {out_path}")
-        if show:
-            _show_stages(pc_stages + out["stages"])
-
-if __name__ == "__main__":
-    run_folder_with_pagecrop("sorularım1", None, show=False)
+    return {"best_box": best_box,
+            "warped_bgr": warped,
+            "final_bw": bw,
+            "stages": stages}

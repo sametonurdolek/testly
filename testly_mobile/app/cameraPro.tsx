@@ -29,9 +29,6 @@ import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuestions } from "../src/QuestionsContext";
-// Import the new object-oriented FileSystem API. The legacy
-// `expo-file-system` module has been replaced with an OOP API in
-// SDK 54. See the changelog for more details【963569638619089†L367-L375】.
 import { File, Directory, Paths } from "expo-file-system";
 
 export default function App() {
@@ -45,7 +42,7 @@ export default function App() {
   const targetFolder = (folder && String(folder).trim()) || "Genel";
 
   // Context
-  const { addQuestion } = useQuestions();
+  const { addQuestion, updateQuestionUri } = useQuestions();
 
   // Enforce a single camera instance while the screen is active
   const [screenActive, setScreenActive] = useState(true);
@@ -54,7 +51,10 @@ export default function App() {
   useFocusEffect(
     useCallback(() => {
       setScreenActive(true);
-      setCameraKey((k) => k + 1); // new instance on each focus
+      setCameraKey((k) => k + 1);
+      // Yeni oturumda seçimler temizlensin
+      setSelected(new Set());
+      setShots([]);
       return () => {
         setScreenActive(false);
         setTorch(false);
@@ -118,44 +118,26 @@ export default function App() {
   }
 
   // ------- helpers -------
+  const saveToAppStorage = async (fromUri: string): Promise<string> => {
+    if (Platform.OS === "web") return fromUri;
 
-  /**
-   * Save a captured media file into the app's storage. When running on
-   * web the camera API provides a base64 URI, which we can return
-   * directly. On native platforms we copy the file into a `photos`
-   * directory under the document directory (falling back to the cache
-   * directory if the document directory does not exist) using the
-   * new object-oriented file-system API. This avoids using the
-   * now‑deprecated imperative methods of the legacy FileSystem API.
-   */
- // cameraPro.tsx içinde
-const saveToAppStorage = async (fromUri: string): Promise<string> => {
-  if (Platform.OS === "web") return fromUri;
+    let baseDir: Directory = Paths.document;
+    if (!baseDir.exists) baseDir = Paths.cache;
 
-  let baseDir: Directory = Paths.document;
-  if (!baseDir.exists) baseDir = Paths.cache;
+    const photosDir = new Directory(baseDir, "photos");
+    if (!photosDir.exists) photosDir.create({ intermediates: true });
 
-  const photosDir = new Directory(baseDir, "photos");
-  if (!photosDir.exists) photosDir.create({ intermediates: true });
+    const srcFile = new File(Paths.dirname(fromUri), Paths.basename(fromUri));
+    const destFile = new File(photosDir, `${Date.now()}.jpg`);
+    srcFile.copy(destFile);
 
-  // URI'den güvenli şekilde kaynak dosyayı kur
-  const srcFile = new File(Paths.dirname(fromUri), Paths.basename(fromUri));
-  const destFile = new File(photosDir, `${Date.now()}.jpg`);
-  srcFile.copy(destFile);
-
-  return destFile.uri;
-};
-
-
-  const onCameraReady = () => {
-    // If needed, you can query available picture sizes here with
-    // CameraView.getAvailablePictureSizesAsync() and pick a specific size.
+    return destFile.uri;
   };
 
+  const onCameraReady = () => {};
   const onMountError = (e: any) => {
     Alert.alert("Kamera açılamadı", e?.message ?? "Bilinmeyen hata");
   };
-
   const onBarcodeScanned = (r: { data: string; type: string }) => {
     if (!scanEnabled) return;
     setScanEnabled(false);
@@ -171,8 +153,15 @@ const saveToAppStorage = async (fromUri: string): Promise<string> => {
     });
     if (!photo?.uri) return;
     const stored = await saveToAppStorage(photo.uri);
+
     setShots((prev) => [stored, ...prev]);
-    setSelected((prev) => new Set(prev).add(stored));
+
+    // ÖNEMLİ: aynı oturumda biriktir, sıfırlama
+    setSelected((prev) => {
+      const n = new Set(prev);
+      n.add(stored);
+      return n;
+    });
   };
 
   const startRecord = async () => {
@@ -187,12 +176,10 @@ const saveToAppStorage = async (fromUri: string): Promise<string> => {
       setRecording(false);
     }
   };
-
   const stopRecord = () => {
     ref.current?.stopRecording();
     setRecording(false);
   };
-
   const toggleRecording = async () => {
     if (recording) stopRecord();
     else await startRecord();
@@ -201,18 +188,13 @@ const saveToAppStorage = async (fromUri: string): Promise<string> => {
   // ------- toggles -------
   const toggleMode = () =>
     setMode((p: CameraMode) => (p === "picture" ? "video" : "picture"));
-
   const toggleFacing = () =>
     setFacing((p: CameraType) => (p === "back" ? "front" : "back"));
-
   const cycleFlash = () =>
     setFlash((f: FlashMode) => (f === "off" ? "on" : f === "on" ? "auto" : "off"));
-
   const toggleTorch = () => setTorch((t: boolean) => !t);
-
   const toggleAF = () =>
     setAutofocus((a: FocusMode) => (a === "on" ? "off" : "on"));
-
   const bumpZoom = (d: number) =>
     setZoom((z: number) => Math.min(1, Math.max(0, +(z + d).toFixed(3))));
 
@@ -226,21 +208,33 @@ const saveToAppStorage = async (fromUri: string): Promise<string> => {
     });
   };
 
- // cameraPro.tsx -> proceed()
-const API = process.env.EXPO_PUBLIC_API_URL!;
-const proceed = async () => {
-  if (selectedCount === 0) return;
-  for (const u of Array.from(selected)) {
-    const form = new FormData();
-    form.append("image", { uri: u, name: "capture.jpg", type: "image/jpeg" } as any);
-    const res = await fetch(`${API}/api/v1/process-image`, { method: "POST", body: form });
-    const json = await res.json();
-    if (res.ok && json.processed_url) addQuestion(targetFolder, json.processed_url, "A");
-  }
-  router.replace({ pathname: "/(tabs)/questions", params: { folder: targetFolder } });
-};
+  // proceed: seçili tüm fotoğraflar placeholder + işlem
+  const API = process.env.EXPO_PUBLIC_API_URL!;
+  const proceed = async () => {
+    if (selected.size === 0) return;
 
+    router.replace({ pathname: "/(tabs)/questions", params: { folder: targetFolder } });
 
+    for (const u of Array.from(selected)) {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+      addQuestion(targetFolder, { id, uri: u, status: "pending" });
+
+      const form = new FormData();
+      form.append("image", { uri: u, name: "capture.jpg", type: "image/jpeg" } as any);
+
+      fetch(`${API}/api/v1/process-image`, { method: "POST", body: form })
+        .then((r) => r.json())
+        .then((json) => {
+          if (json?.processed_url) {
+            updateQuestionUri(targetFolder, id, json.processed_url, "ready");
+          }
+        })
+        .catch((err) => {
+          console.error("Upload failed:", err);
+        });
+    }
+  };
 
   // ------- UI controls -------
   const IconBtn: React.FC<PressableProps & { children: React.ReactNode }> = ({
@@ -268,25 +262,10 @@ const proceed = async () => {
 
   const shutterInnerStyle =
     mode === "picture"
-      ? {
-          width: 80,
-          height: 80,
-          borderRadius: 9999,
-          backgroundColor: "white",
-        }
+      ? { width: 80, height: 80, borderRadius: 9999, backgroundColor: "white" }
       : recording
-      ? {
-          width: 80,
-          height: 80,
-          borderRadius: 9999,
-          backgroundColor: "#6b7280",
-        }
-      : {
-          width: 80,
-          height: 80,
-          borderRadius: 9999,
-          backgroundColor: "#dc2626",
-        };
+      ? { width: 80, height: 80, borderRadius: 9999, backgroundColor: "#6b7280" }
+      : { width: 80, height: 80, borderRadius: 9999, backgroundColor: "#dc2626" };
 
   const Controls = () => (
     <View
@@ -300,7 +279,6 @@ const proceed = async () => {
         justifyContent: "flex-end",
       }}
     >
-      {/* Bottom: shot strip */}
       {shots.length > 0 && (
         <View style={{ marginBottom: 160, paddingHorizontal: 8 }}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -332,7 +310,6 @@ const proceed = async () => {
         </View>
       )}
 
-      {/* Bottom: main control panel */}
       <View
         style={{
           minHeight: 140,
@@ -345,7 +322,6 @@ const proceed = async () => {
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center" }}>
-          {/* Left group */}
           <View
             style={{
               flex: 1,
@@ -362,17 +338,14 @@ const proceed = async () => {
                 <Feather name="video" size={22} color="white" />
               )}
             </IconBtn>
-
             <IconBtn onPress={cycleFlash}>
               <Feather name="zap" size={22} color={flash === "off" ? "gray" : "white"} />
             </IconBtn>
-
             <IconBtn onPress={toggleAF}>
               <Feather name="crosshair" size={22} color={autofocus === "on" ? "white" : "gray"} />
             </IconBtn>
           </View>
 
-          {/* Middle shutter */}
           <View style={{ width: 112, alignItems: "center", justifyContent: "center" }}>
             <Pressable
               onPress={mode === "picture" ? takePicture : toggleRecording}
@@ -394,7 +367,6 @@ const proceed = async () => {
             </Pressable>
           </View>
 
-          {/* Right group */}
           <View
             style={{
               flex: 1,
@@ -407,19 +379,15 @@ const proceed = async () => {
             <IconBtn onPress={toggleFacing}>
               <FontAwesome6 name="rotate-left" size={22} color="white" />
             </IconBtn>
-
             <IconBtn onPress={toggleTorch}>
               <Feather name="sun" size={22} color={torch ? "white" : "gray"} />
             </IconBtn>
-
             <IconBtn onPress={() => bumpZoom(+0.1)}>
               <Feather name="zoom-in" size={22} color="white" />
             </IconBtn>
-
             <IconBtn onPress={() => bumpZoom(-0.1)}>
               <Feather name="zoom-out" size={22} color="white" />
             </IconBtn>
-
             <IconBtn onPress={() => setScanEnabled((s) => !s)}>
               <Feather name="maximize" size={22} color={scanEnabled ? "white" : "gray"} />
             </IconBtn>
@@ -429,16 +397,13 @@ const proceed = async () => {
     </View>
   );
 
-  // Camera + overlay
   return (
     <View style={{ flex: 1, backgroundColor: "black" }}>
-      {/* Top bar */}
       <SafeAreaView edges={["top"]} style={{ paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
           <Text style={{ color: "white", fontWeight: "600" }}>
             {targetFolder} • Seçili: {selectedCount}
           </Text>
-
           <TouchableOpacity
             onPress={proceed}
             disabled={selectedCount === 0}
@@ -454,7 +419,6 @@ const proceed = async () => {
         </View>
       </SafeAreaView>
 
-      {/* Camera + overlay */}
       <View style={{ flex: 1, position: "relative" }}>
         {screenActive ? (
           <CameraView
@@ -476,10 +440,7 @@ const proceed = async () => {
             onCameraReady={onCameraReady}
             onMountError={onMountError}
             {...(scanEnabled
-              ? {
-                  onBarcodeScanned: onBarcodeScanned,
-                  barcodeScannerSettings: { barcodeTypes: ["qr"] },
-                }
+              ? { onBarcodeScanned: onBarcodeScanned, barcodeScannerSettings: { barcodeTypes: ["qr"] } }
               : {})}
           />
         ) : null}
