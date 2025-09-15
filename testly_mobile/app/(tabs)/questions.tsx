@@ -110,6 +110,39 @@ export default function QuestionsScreen() {
     );
   };
 
+  // Frontend'den PDF oluşturma örneği
+  const generatePDF = async (images: File[], answers: string[]) => {
+    try {
+      // Önce görselleri upload et
+      const formData = new FormData();
+      images.forEach(img => formData.append('images', img));
+      
+      const uploadResponse = await fetch('http://localhost:5000/api/pdf/upload-images', {
+        method: 'POST',
+        body: formData
+      });
+      
+      const uploadData = await uploadResponse.json();
+      
+      // Sonra PDF oluştur
+      const pdfResponse = await fetch('http://localhost:5000/api/pdf/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          images: uploadData.uploaded_files,
+          answers: answers,
+          user_id: 'user123'
+        })
+      });
+      
+      const pdfData = await pdfResponse.json();
+      console.log('PDF oluşturuldu:', pdfData.download_url);
+      
+    } catch (error) {
+      console.error('PDF oluşturma hatası:', error);
+    }
+  };
+
   return (
     <View className="flex-1 bg-white px-4 pt-12">
       {/* Header */}
